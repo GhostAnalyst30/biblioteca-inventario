@@ -5,13 +5,19 @@ import { api } from '../api'
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [alerts, setAlerts] = useState([])
+  const [loans, setLoans] = useState([])
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.get('/api/dashboard'), api.get('/api/alerts?solo_no_leidas=true')])
-      .then(([dash, al]) => {
+    Promise.all([
+      api.get('/api/dashboard'),
+      api.get('/api/alerts?solo_no_leidas=true'),
+      api.get('/api/loans?estado=activo'),
+    ])
+      .then(([dash, al, ln]) => {
         setData(dash)
-        setAlerts(al.slice(0, 6))
+        setAlerts(al.slice(0, 5))
+        setLoans(ln.slice(0, 5))
       })
       .catch((e) => setError(e.message))
   }, [])
@@ -33,11 +39,16 @@ export default function Dashboard() {
       <header className="page-head">
         <div>
           <h1>Panel operativo</h1>
-          <p>Resumen del inventario y préstamos de la biblioteca.</p>
+          <p>Resumen del inventario, alertas y préstamos en curso.</p>
         </div>
-        <Link className="btn primary" to="/prestamos">
-          Nuevo préstamo
-        </Link>
+        <div className="row">
+          <Link className="btn" to="/estudiantes">
+            Estudiantes
+          </Link>
+          <Link className="btn primary" to="/prestamos">
+            Nuevo préstamo
+          </Link>
+        </div>
       </header>
       <div className="kpi-grid">
         {cards.map((c) => (
@@ -47,24 +58,54 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Alertas recientes</h2>
-          <Link to="/alertas">Ver todas</Link>
-        </div>
-        {alerts.length === 0 ? (
-          <p className="muted">No hay alertas pendientes.</p>
-        ) : (
-          <ul className="alert-list">
-            {alerts.map((a) => (
-              <li key={a.id} className={`alert-item ${a.tipo}`}>
-                <strong>{a.tipo.replace('_', ' ')}</strong>
-                <span>{a.mensaje}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <div className="split">
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Alertas recientes</h2>
+            <Link to="/alertas">Ver todas</Link>
+          </div>
+          {alerts.length === 0 ? (
+            <p className="muted">No hay alertas pendientes.</p>
+          ) : (
+            <ul className="alert-list">
+              {alerts.map((a) => (
+                <li key={a.id} className={`alert-item ${a.tipo}`}>
+                  <div>
+                    <strong>{a.tipo.replace('_', ' ')}</strong>
+                    <span>{a.mensaje}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Próximas devoluciones</h2>
+            <Link to="/prestamos">Ver préstamos</Link>
+          </div>
+          {loans.length === 0 ? (
+            <p className="muted">Sin préstamos activos.</p>
+          ) : (
+            <ul className="simple-list">
+              {loans.map((l) => (
+                <li key={l.id}>
+                  <strong>{l.book_titulo}</strong>
+                  <div className="muted">
+                    {l.student_nombre} · {l.fecha_devolucion_esperada}
+                    {l.dias_restantes != null && (
+                      <span className={l.dias_restantes < 0 ? ' danger-text' : l.dias_restantes <= 3 ? ' warn-text' : ''}>
+                        {' '}
+                        ({l.dias_restantes < 0 ? `${Math.abs(l.dias_restantes)}d atraso` : `${l.dias_restantes}d`})
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   )
 }

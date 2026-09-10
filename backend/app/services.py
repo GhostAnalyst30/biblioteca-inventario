@@ -17,20 +17,87 @@ def get_or_create_settings(db: Session) -> AppSettings:
 
 
 def recalculate_reliability(db: Session, student: Student) -> int:
-    loans = db.scalars(
+    """Recalcula score 0-100 según historial real de devoluciones.
+
+    Importante: llamar después de db.flush() para que la devolución actual
+    ya sea visible en la consulta.
+    """
+    returned = db.scalars(
         select(Loan).where(Loan.student_id == student.id, Loan.estado == "devuelto")
     ).all()
-    if not loans:
+    overdue_open = db.scalars(
+        select(Loan).where(Loan.student_id == student.id, Loan.estado == "vencido")
+    ).all()
+    damaged_returns = db.scalars(
+        select(LoanComment)
+        .join(Loan, Loan.id == LoanComment.loan_id)
+        .where(
+            Loan.student_id == student.id,
+            LoanComment.tipo == "devolucion",
+            LoanComment.condicion == "danado",
+        )
+    ).all()
+
+    if not returned and not overdue_open:
         student.reliability_score = 100
         return 100
-    on_time = sum(
-        1
-        for loan in loans
-        if loan.fecha_devolucion_real and loan.fecha_devolucion_real <= loan.fecha_devolucion_esperada
-    )
-    score = round((on_time / len(loans)) * 100)
+
+    # Puntaje base: porcentaje a tiempo (cada préstamo cuenta)
+    points = 0.0
+    total = 0
+    for loan in returned:
+        total += 1
+        if not loan.fecha_devolucion_real:
+            points += 50  # dato incompleto: neutro
+            continue
+        delay = (loan.fecha_devolucion_real - loan.fecha_devolucion_esperada).days
+        if delay <= 0:
+            points += 100
+        elif delay <= 3:
+            points += 70
+        elif delay <= 7:
+            points += 40
+        else:
+            points += max(0, 20 - delay)  # muy tarde
+
+    # Préstamos vencidos abiertos penalizan como si fueran tardíos graves
+    for _ in overdue_open:
+        total += 1
+        points += 15
+
+    score = round(points / total) if total else 100
+
+    # Penalización por libros devueltos dañados
+    score = max(0, score - (8 * len(damaged_returns)))
+    score = min(100, score)
+
     student.reliability_score = score
     return score
+
+
+def score_breakdown(db: Session, student: Student) -> dict:
+    returned = db.scalars(
+        select(Loan).where(Loan.student_id == student.id, Loan.estado == "devuelto")
+    ).all()
+    overdue = db.scalar(
+        select(func.count()).select_from(Loan).where(
+            Loan.student_id == student.id, Loan.estado == "vencido"
+        )
+    ) or 0
+    on_time = sum(
+        1
+        for loan in returned
+        if loan.fecha_devolucion_real and loan.fecha_devolucion_real <= loan.fecha_devolucion_esperada
+    )
+    late = len(returned) - on_time
+    return {
+        "score": student.reliability_score,
+        "devueltos": len(returned),
+        "a_tiempo": on_time,
+        "tarde": late,
+        "vencidos_abiertos": overdue,
+        "tasa_puntualidad": round((on_time / len(returned)) * 100, 1) if returned else None,
+    }
 
 
 def loan_dias_restantes(loan: Loan, today: date | None = None) -> int:
@@ -110,10 +177,17 @@ def serialize_alert(alert: Alert) -> dict:
 def mark_overdue_loans(db: Session) -> int:
     today = date.today()
     loans = db.scalars(
-        select(Loan).where(Loan.estado == "activo", Loan.fecha_devolucion_esperada < today)
-    ).all()
+        select(Loan)
+        .options(joinedload(Loan.student))
+        .where(Loan.estado == "activo", Loan.fecha_devolucion_esperada < today)
+    ).unique().all()
+    affected_students: dict = {}
     for loan in loans:
         loan.estado = "vencido"
+        if loan.student:
+            affected_students[loan.student.id] = loan.student
+    for student in affected_students.values():
+        recalculate_reliability(db, student)
     db.commit()
     return len(loans)
 

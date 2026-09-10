@@ -192,6 +192,9 @@ class LoanOut(BaseModel):
     copy_etiqueta: Optional[str] = None
     dias_restantes: Optional[int] = None
     comments: list[LoanCommentOut] = []
+    score_antes: Optional[int] = None
+    score_despues: Optional[int] = None
+    warnings: list[str] = []
 
     model_config = {"from_attributes": True}
 

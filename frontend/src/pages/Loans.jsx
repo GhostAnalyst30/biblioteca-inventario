@@ -17,10 +17,12 @@ export default function Loans() {
   const [returnForm, setReturnForm] = useState({})
   const [error, setError] = useState('')
   const [warnings, setWarnings] = useState([])
+  const [msg, setMsg] = useState('')
 
   async function load() {
+    const qs = estado === 'todos' ? '' : `?estado=${estado}`
     const [l, s, c] = await Promise.all([
-      api.get(`/api/loans?estado=${estado}`),
+      api.get(`/api/loans${qs}`),
       api.get('/api/students'),
       api.get('/api/copies?estado=disponible'),
     ])
@@ -37,6 +39,7 @@ export default function Loans() {
     e.preventDefault()
     setError('')
     setWarnings([])
+    setMsg('')
     try {
       const payload = {
         ...form,
@@ -52,6 +55,7 @@ export default function Loans() {
         comentario_entrega: '',
         forzar: false,
       })
+      setMsg('Préstamo registrado')
       await load()
     } catch (err) {
       if (err.detail?.warnings) setWarnings(err.detail.warnings)
@@ -61,8 +65,29 @@ export default function Loans() {
 
   async function returnLoan(loanId) {
     const data = returnForm[loanId] || { condicion_devolucion: 'bueno', comentario_devolucion: '' }
+    setError('')
+    setMsg('')
     try {
-      await api.post(`/api/loans/${loanId}/return`, data)
+      const result = await api.post(`/api/loans/${loanId}/return`, data)
+      if (result.score_antes != null && result.score_despues != null) {
+        setMsg(
+          `Devolución registrada. Score del estudiante: ${result.score_antes} → ${result.score_despues}`
+        )
+      } else {
+        setMsg('Devolución registrada')
+      }
+      await load()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function renewLoan(loanId) {
+    setError('')
+    setMsg('')
+    try {
+      const result = await api.post(`/api/loans/${loanId}/renew?dias=7`)
+      setMsg(`Préstamo renovado. Nueva fecha: ${result.fecha_devolucion_esperada}`)
       await load()
     } catch (err) {
       setError(err.message)
@@ -80,9 +105,11 @@ export default function Loans() {
           <option value="activo">Activos</option>
           <option value="vencido">Vencidos</option>
           <option value="devuelto">Devueltos</option>
+          <option value="todos">Todos</option>
         </select>
       </header>
       {error && <div className="banner error">{error}</div>}
+      {msg && <div className="banner ok">{msg}</div>}
       {warnings.length > 0 && (
         <div className="banner warn">
           {warnings.map((w) => (
@@ -192,7 +219,15 @@ export default function Loans() {
                 <button className="btn primary" onClick={() => returnLoan(l.id)}>
                   Registrar devolución
                 </button>
+                <button className="btn" onClick={() => renewLoan(l.id)}>
+                  Renovar +7 días
+                </button>
               </div>
+            )}
+            {l.estado === 'devuelto' && l.student_score != null && (
+              <p className="muted">
+                Score actual del estudiante: <strong className="score">{l.student_score}</strong>
+              </p>
             )}
           </article>
         ))}

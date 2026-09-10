@@ -46,6 +46,15 @@ export default function Admin() {
     }
   }
 
+  async function recalcAll() {
+    try {
+      const data = await api.post('/api/admin/recalculate-scores')
+      setMsg(`Scores recalculados para ${data.students.length} estudiantes`)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   if (!settings) return <div className="center">Cargando…</div>
 
   return (
@@ -131,6 +140,9 @@ export default function Admin() {
             Bloquear si tiene vencidos
           </label>
           <button className="btn primary">Guardar configuración</button>
+          <button className="btn" type="button" onClick={recalcAll}>
+            Recalcular scores de todos
+          </button>
         </form>
       </div>
     </div>

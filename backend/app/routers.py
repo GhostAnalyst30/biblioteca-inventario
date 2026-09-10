@@ -47,6 +47,7 @@ from app.services import (
     generate_alerts,
     get_or_create_settings,
     recalculate_reliability,
+    score_breakdown,
     serialize_alert,
     serialize_book,
     serialize_loan,
@@ -197,10 +198,12 @@ def student_eligibility(student_id: UUID, _: StaffUser, db: Session = Depends(ge
     if not student:
         raise HTTPException(404, "Estudiante no encontrado")
     ok, warnings = eligibility_check(db, student)
+    breakdown = score_breakdown(db, student)
     return {
         "eligible": ok,
         "warnings": warnings,
         "reliability_score": student.reliability_score,
+        "breakdown": breakdown,
         "prediccion": (
             "Alta probabilidad de devolver a tiempo"
             if student.reliability_score >= 80
@@ -209,6 +212,17 @@ def student_eligibility(student_id: UUID, _: StaffUser, db: Session = Depends(ge
             else "Alta probabilidad de NO devolver a tiempo"
         ),
     }
+
+
+@router.post("/students/{student_id}/recalculate-score")
+def recalc_student_score(student_id: UUID, _: StaffUser, db: Session = Depends(get_db)):
+    student = db.get(Student, student_id)
+    if not student:
+        raise HTTPException(404, "Estudiante no encontrado")
+    score = recalculate_reliability(db, student)
+    db.commit()
+    db.refresh(student)
+    return {"reliability_score": score, "breakdown": score_breakdown(db, student)}
 
 
 # -------- Books & copies --------
@@ -446,6 +460,7 @@ def return_loan(loan_id: UUID, payload: LoanReturn, user: StaffUser, db: Session
     if loan.estado == "devuelto":
         raise HTTPException(400, "Este préstamo ya fue devuelto")
 
+    score_antes = loan.student.reliability_score if loan.student else None
     loan.fecha_devolucion_real = payload.fecha_devolucion_real or date.today()
     loan.estado = "devuelto"
     if loan.copy:
@@ -460,14 +475,72 @@ def return_loan(loan_id: UUID, payload: LoanReturn, user: StaffUser, db: Session
             created_by=user.id,
         )
     )
+    # Flush para que el SELECT del score vea esta devolución
+    db.flush()
+    score_despues = None
     if loan.student:
-        recalculate_reliability(db, loan.student)
-    # mark related alerts read
+        score_despues = recalculate_reliability(db, loan.student)
     for alert in db.scalars(select(Alert).where(Alert.loan_id == loan.id)).all():
         alert.leida = True
-    audit(db, user, "devolver_prestamo", "loans", str(loan.id))
+    audit(
+        db,
+        user,
+        "devolver_prestamo",
+        "loans",
+        str(loan.id),
+        detalle={"score_antes": score_antes, "score_despues": score_despues},
+    )
     db.commit()
-    db.refresh(loan)
+    loan = db.scalar(
+        select(Loan)
+        .options(
+            joinedload(Loan.student),
+            joinedload(Loan.copy).joinedload(Copy.book),
+            joinedload(Loan.comments),
+        )
+        .where(Loan.id == loan_id)
+    )
+    result = serialize_loan(loan)
+    result["score_antes"] = score_antes  # type: ignore
+    result["score_despues"] = score_despues  # type: ignore
+    return result
+
+
+@router.post("/loans/{loan_id}/renew", response_model=LoanOut)
+def renew_loan(
+    loan_id: UUID,
+    user: StaffUser,
+    dias: int = Query(7, ge=1, le=60),
+    db: Session = Depends(get_db),
+):
+    loan = db.scalar(
+        select(Loan)
+        .options(
+            joinedload(Loan.student),
+            joinedload(Loan.copy).joinedload(Copy.book),
+            joinedload(Loan.comments),
+        )
+        .where(Loan.id == loan_id)
+    )
+    if not loan:
+        raise HTTPException(404, "Préstamo no encontrado")
+    if loan.estado == "devuelto":
+        raise HTTPException(400, "No se puede renovar un préstamo ya devuelto")
+    base = max(loan.fecha_devolucion_esperada, date.today())
+    loan.fecha_devolucion_esperada = base + timedelta(days=dias)
+    if loan.estado == "vencido":
+        loan.estado = "activo"
+    audit(db, user, "renovar_prestamo", "loans", str(loan.id), detalle={"dias": dias})
+    db.commit()
+    loan = db.scalar(
+        select(Loan)
+        .options(
+            joinedload(Loan.student),
+            joinedload(Loan.copy).joinedload(Copy.book),
+            joinedload(Loan.comments),
+        )
+        .where(Loan.id == loan_id)
+    )
     return serialize_loan(loan)
 
 
@@ -672,3 +745,15 @@ def update_settings(payload: SettingsUpdate, admin: AdminUser, db: Session = Dep
     db.commit()
     db.refresh(settings)
     return settings
+
+
+@router.post("/admin/recalculate-scores")
+def recalc_all_scores(admin: AdminUser, db: Session = Depends(get_db)):
+    students = db.scalars(select(Student).where(Student.active.is_(True))).all()
+    results = []
+    for student in students:
+        score = recalculate_reliability(db, student)
+        results.append({"id": str(student.id), "nombre": student.nombre, "score": score})
+    audit(db, admin, "recalcular_scores", "students", detalle={"count": len(results)})
+    db.commit()
+    return {"ok": True, "students": results}
