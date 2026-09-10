@@ -54,9 +54,11 @@ app = FastAPI(title="Biblioteca Inventario API", version="1.0.0", lifespan=lifes
 settings = get_settings()
 
 origins = settings.cors_origin_list
+# Bearer JWT no requiere cookies; permitir orígenes configurados o todos en despliegue.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins if origins else ["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
