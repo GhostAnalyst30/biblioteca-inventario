@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: biblioteca-inventario-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ALERT_CRON_SECRET
+        generateValue: true
+      - key: ADMIN_SEED_EMAIL
+        value: admin@biblioteca.app
+      - key: ADMIN_SEED_PASSWORD
+        value: Admin123!
+      - key: LIBRARIAN_SEED_EMAIL
+        value: biblio@biblioteca.app
+      - key: LIBRARIAN_SEED_PASSWORD
+        value: Biblio123!
+
+  - type: cron
+    name: biblioteca-alertas-cron
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    schedule: "0 12 * * *"
+    buildCommand: pip install requests
+    startCommand: python jobs/generate_alerts.py
+    envVars:
+      - key: API_URL
+        fromService:
+          name: biblioteca-inventario-api
+          type: web
+          property: host
+      - key: ALERT_CRON_SECRET
+        fromService:
+          name: biblioteca-inventario-api
+          type: web
+          envVarKey: ALERT_CRON_SECRET

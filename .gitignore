@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.DS_Store
+.db_password.local
+.database_url.local
+*.local
+.supabase/.temp/
+frontend/dist/
+backend/.venv/
+.cursor/
+supabase/.temp/
