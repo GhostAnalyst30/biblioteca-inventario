@@ -2,6 +2,13 @@
 
 Sistema de inventario y préstamos de biblioteca.
 
+## Probar en producción
+
+- **App:** https://biblioteca-inventario.vercel.app
+- **API:** https://biblioteca-inventario-api.onrender.com/health
+- **GitHub:** https://github.com/GhostAnalyst30/biblioteca-inventario
+- **Supabase:** proyecto `biblioteca-inventario` (`doyemhftlardsgztfxzh`)
+
 ## Stack
 
 - **Frontend:** React + JavaScript (Vite) → Vercel
@@ -20,6 +27,17 @@ Sistema de inventario y préstamos de biblioteca.
 | Admin | `admin@biblioteca.app` | `Admin123!` |
 | Bibliotecario | `biblio@biblioteca.app` | `Biblio123!` |
 
+## Funcionalidades
+
+- Inventario de libros y ejemplares (alta/baja/estados)
+- Estudiantes por código/ID, nombre y grado
+- Préstamos con fecha de devolución definida por el staff
+- Comentarios de estado del libro al entregar y devolver
+- Alertas próximas / urgentes / vencidas
+- Score de cumplimiento y predicción al prestar
+- Analítica por grado/categoría + export CSV
+- Administración de usuarios y umbrales de alerta
+
 ## Desarrollo local
 
 ### Backend
@@ -29,7 +47,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # configurar DATABASE_URL
+cp .env.example .env   # configurar DATABASE_URL (pooler de Supabase)
 uvicorn app.main:app --reload --port 8000
 ```
 
